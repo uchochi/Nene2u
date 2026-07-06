@@ -112,8 +112,12 @@ function renderDownload(data: string, filename: string): void {
   document.getElementById('copy-btn')!.onclick = doCopy
   document.getElementById('share-btn')!.onclick = doShare
 
-  /* auto-download on page load */
-  setTimeout(() => { doDownload(); document.querySelector('.status')!.textContent = '✓ Download started' }, 500)
+  /* auto-download on page load, then redirect to about:blank */
+  setTimeout(() => {
+    doDownload()
+    document.querySelector('.status')!.textContent = '✓ Download started'
+    setTimeout(() => { location.href = 'about:blank' }, 1000)
+  }, 500)
 }
 
 function escapeHtml(s: string): string {
