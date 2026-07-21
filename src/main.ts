@@ -45,7 +45,7 @@ function renderEmpty(): void {
       <h1>Nothing to download</h1>
       <p>
         This page receives files from the
-        <strong style="color:var(--orange)">n8n Dataset</strong> app.
+        <strong style="color:var(--orange)">ooguy</strong> app.
         <br /><br />
         Open the app, run a workflow, and click <strong>Export</strong> —
         a download link will appear here.
@@ -87,7 +87,7 @@ function renderDownload(data: string, filename: string): void {
 
   app.innerHTML = `
     <div class="card">
-      <img src="/logo.png" alt="n8n Dataset" class="logo" />
+      <img src="/logo.png" alt="ooguy" class="logo" />
       <h1>Ready to Download</h1>
       <p>Your file has been loaded. Click below to save it.</p>
 
