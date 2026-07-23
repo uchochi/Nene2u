@@ -1,138 +1,192 @@
 import './style.css'
 
 /* ------------------------------------------------------------------ */
-/*  Base64 helpers (UTF-8 safe)                                        */
+/*  Base64 decode (UTF-8 safe)                                         */
 /* ------------------------------------------------------------------ */
 
-function decodeB64(s: string): string {
+function decodeBase64(raw: string): string {
   try {
-    return decodeURIComponent(escape(atob(s)))
+    return decodeURIComponent(escape(atob(raw)))
   } catch {
     return ''
   }
 }
 
 /* ------------------------------------------------------------------ */
-/*  URL hash parsing                                                   */
+/*  Hash parser                                                        */
 /* ------------------------------------------------------------------ */
 
-function parseHash(): { data: string; filename: string } | null {
-  const hash = location.hash.replace(/^#/, '')
-  if (!hash) return null
+interface DownloadPayload {
+  content: string
+  filename: string
+}
 
-  const params = new URLSearchParams(hash)
-  const d = params.get('d')
-  const f = params.get('f')
-  if (!d || !f) return null
+function parseHash(): DownloadPayload | null {
+  const raw = location.hash.slice(1)
+  if (!raw) return null
 
-  const data = decodeB64(d)
-  const filename = decodeB64(f)
-  if (!data || !filename) return null
+  const params = new URLSearchParams(raw)
+  const data = params.get('d')
+  const file = params.get('f')
+  if (!data || !file) return null
 
-  return { data, filename }
+  const content = decodeBase64(data)
+  const filename = decodeBase64(file)
+  if (!content || !filename) return null
+
+  return { content, filename }
 }
 
 /* ------------------------------------------------------------------ */
-/*  Render                                                             */
+/*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-const app = document.getElementById('app')!
+function escapeHtml(str: string): string {
+  const el = document.createElement('span')
+  el.textContent = str
+  return el.innerHTML
+}
 
-function renderEmpty(): void {
-  app.innerHTML = `
-    <div class="card">
-      <div class="empty-icon">📂</div>
+function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1048576).toFixed(1)} MB`
+}
+
+/* ------------------------------------------------------------------ */
+/*  Download engine                                                    */
+/* ------------------------------------------------------------------ */
+
+function triggerDownload(content: string, filename: string): void {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.hidden = true
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+/* ------------------------------------------------------------------ */
+/*  Render: empty state                                                */
+/* ------------------------------------------------------------------ */
+
+function renderEmpty(root: HTMLElement): void {
+  root.innerHTML = `
+    <div class="card card--enter">
+      <div class="empty-badge">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+      </div>
       <h1>Nothing to download</h1>
-      <p>
+      <p class="muted">
         This page receives files from the
-        <strong style="color:var(--orange)">ooguy</strong> app.
-        <br /><br />
-        Open the app, run a workflow, and click <strong>Export</strong> —
-        a download link will appear here.
+        <strong class="brand">ooguy</strong> app.
       </p>
+      <div class="hint">
+        Open the app, run a workflow, and tap <strong>Export</strong> —
+        your download will appear here automatically.
+      </div>
     </div>
   `
 }
 
-function renderDownload(data: string, filename: string): void {
-  const sizeKB = ((new Blob([data]).size) / 1024).toFixed(1)
-  const fullUrl = location.href
+/* ------------------------------------------------------------------ */
+/*  Render: download state                                             */
+/* ------------------------------------------------------------------ */
 
-  function doDownload(): void {
-    const blob = new Blob([data], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.style.display = 'none'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
+function renderDownload(root: HTMLElement, payload: DownloadPayload): void {
+  const bytes = new Blob([payload.content]).size
+  const url = location.href
 
-  function doCopy(): void {
-    navigator.clipboard.writeText(fullUrl).catch(() => {})
-    const btn = document.getElementById('copy-btn') as HTMLButtonElement
-    if (btn) { btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = 'Copy Link' }, 2000) }
-  }
-
-  function doShare(): void {
-    if (navigator.share) {
-      navigator.share({ url: fullUrl }).catch(() => {})
-    } else {
-      doCopy()
-    }
-  }
-
-  app.innerHTML = `
-    <div class="card">
+  root.innerHTML = `
+    <div class="card card--enter">
       <img src="/logo.png" alt="ooguy" class="logo" />
-      <h1>Ready to Download</h1>
-      <p>Your file has been loaded. Click below to save it.</p>
 
-      <div class="file-info">
-        <div class="name">${escapeHtml(filename)}</div>
-        <div class="size">${sizeKB} KB</div>
+      <h1>Ready to Download</h1>
+      <p class="muted">Your file has been prepared. Tap below to save it.</p>
+
+      <div class="file-meta">
+        <div class="file-name">${escapeHtml(payload.filename)}</div>
+        <div class="file-size">${fileSize(bytes)}</div>
       </div>
 
-      <div class="status ok">● Auto-download started…</div>
+      <div class="progress" id="progress">
+        <div class="progress-bar"></div>
+      </div>
+      <div class="status" id="status">
+        <span class="dot dot--pending"></span> Preparing download&hellip;
+      </div>
 
-      <div class="url-box">${escapeHtml(fullUrl)}</div>
+      <div class="url-box" id="url-box">${escapeHtml(url)}</div>
 
       <div class="actions">
-        <button id="dl-btn" class="btn btn-primary">⬇ Download</button>
-        <button id="copy-btn" class="btn btn-secondary">Copy Link</button>
-        <button id="share-btn" class="btn btn-secondary">↗ Share</button>
+        <button class="btn btn--primary" id="btn-dl">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download
+        </button>
+        <button class="btn btn--secondary" id="btn-copy">Copy Link</button>
+        <button class="btn btn--secondary" id="btn-share">Share</button>
       </div>
     </div>
   `
 
-  document.getElementById('dl-btn')!.onclick = doDownload
-  document.getElementById('copy-btn')!.onclick = doCopy
-  document.getElementById('share-btn')!.onclick = doShare
+  const $status = document.getElementById('status')!
+  const $progress = document.getElementById('progress')!
 
-  /* auto-download on page load, then redirect to about:blank */
+  /* button wiring */
+  document.getElementById('btn-dl')!.addEventListener('click', () => {
+    triggerDownload(payload.content, payload.filename)
+    flashStatus($status, 'Download started', 'ok')
+  })
+
+  document.getElementById('btn-copy')!.addEventListener('click', () => {
+    navigator.clipboard.writeText(url).catch(() => {})
+    const btn = document.getElementById('btn-copy')!
+    btn.textContent = '✓ Copied'
+    setTimeout(() => { btn.textContent = 'Copy Link' }, 2000)
+  })
+
+  document.getElementById('btn-share')!.addEventListener('click', () => {
+    if (navigator.share) {
+      navigator.share({ url }).catch(() => {})
+    } else {
+      navigator.clipboard.writeText(url).catch(() => {})
+      flashStatus($status, 'Link copied to clipboard', 'ok')
+    }
+  })
+
+  /* auto-download sequence */
   setTimeout(() => {
-    doDownload()
-    document.querySelector('.status')!.textContent = '✓ Download started'
-    setTimeout(() => { location.href = 'about:blank' }, 1000)
-  }, 500)
+    triggerDownload(payload.content, payload.filename)
+    flashStatus($status, '✓ Download started', 'ok')
+    $progress.classList.add('progress--done')
+
+    setTimeout(() => { location.href = 'about:blank' }, 1200)
+  }, 600)
 }
 
-function escapeHtml(s: string): string {
-  const div = document.createElement('div')
-  div.textContent = s
-  return div.innerHTML
+function flashStatus(el: HTMLElement, msg: string, kind: 'ok' | 'err'): void {
+  el.innerHTML = `<span class="dot dot--${kind}"></span> ${msg}`
 }
 
 /* ------------------------------------------------------------------ */
 /*  Boot                                                               */
 /* ------------------------------------------------------------------ */
 
-const info = parseHash()
-if (info) {
-  renderDownload(info.data, info.filename)
+const root = document.getElementById('app')!
+const payload = parseHash()
+
+if (payload) {
+  renderDownload(root, payload)
 } else {
-  renderEmpty()
+  renderEmpty(root)
 }
